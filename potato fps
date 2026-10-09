@@ -1,0 +1,236 @@
+html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spud Cup: Potato FPS</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Courier New', Courier, monospace;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        /* Cuphead Retro Film Grain Overlay */
+        #grain-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: url('https://giphy.com');
+            opacity: 0.05;
+            pointer-events: none;
+            z-index: 10;
+        }
+        /* UI HUD Overlay */
+        #hud {
+            position: absolute;
+            top: 20px; left: 20px;
+            color: #fff; font-size: 24px; font-weight: bold;
+            text-shadow: 3px 3px #ff3300, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+            z-index: 5;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 10px; height: 10px;
+            transform: translate(-50%, -50%);
+            border: 2px solid white;
+            border-radius: 50%;
+            z-index: 5;
+            pointer-events: none;
+        }
+        /* Retro 2D Hand-drawn Style Gun */
+        #fps-gun {
+            position: absolute;
+            bottom: 0; left: 50%;
+            transform: translateX(-50%);
+            width: 250px; height: auto;
+            z-index: 6;
+            pointer-events: none;
+        }
+        #instructions {
+            position: absolute;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            color: #ffcc00;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            text-align: center; z-index: 20;
+            font-size: 20px;
+        }
+        .cuphead-title {
+            font-size: 48px; color: #ff3300; margin-bottom: 10px;
+            text-shadow: 3px 3px #fff;
+        }
+        .play-btn {
+            background: #ff3300; color: white; border: 4px solid white;
+            padding: 15px 40px; font-size: 24px; font-weight: bold;
+            cursor: pointer; margin-top: 20px; box-shadow: 0 5px #990000;
+        }
+    </style>
+    <!-- Include Three.js via absolute trusted CDN -->
+    <script src="https://cloudflare.com"></script>
+</head>
+<body>
+
+    <div id="grain-overlay"></div>
+    <div id="crosshair"></div>
+    
+    <div id="hud">
+        HP: <span id="hp-val">3</span>/3 | BOSS HP: <span id="boss-hp-val">100</span>%
+    </div>
+
+    <!-- Hand-drawn style retro blaster finger weapon -->
+    <img id="fps-gun" src="https://ibb.co" alt="Gun">
+
+    <div id="instructions">
+        <div class="cuphead-title">SPUD CUP: POTATO FPS</div>
+        <p>A KNOCKOUT IS BREWING!</p>
+        <p>Move: <b>W, A, S, D</b> keys<br>Aim: <b>Move Mouse</b><br>Shoot: <b>Left Click</b></p>
+        <button class="play-btn" onclick="startGame()">WALLOP!</button>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        let scene, camera, renderer, clock;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let bossPotato, bossTweenY = 0;
+        let playerHp = 3, bossHp = 100;
+        let isPlaying = false;
+        
+        // Mouse look control system variables
+        let yaw = 0, pitch = 0;
+        const mouseSensitivity = 0.002;
+
+        function init3D() {
+            clock = new THREE.Clock();
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xfae0b3); // Cuphead vintage paper color
+            scene.fog = new THREE.FogExp2(0xfae0b3, 0.015);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.y = 2; // Match eye level height
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Lighting Setup
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffeebb, 0.8);
+            dirLight.position.set(10, 20, 10);
+            scene.add(dirLight);
+
+            // Arena Vintage Floor Grid
+            const floorGeo = new THREE.PlaneGeometry(100, 100);
+            const floorMat = new THREE.MeshToonMaterial({ color: 0x8a7355 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // Spawn the Giant Cuphead-style Cartoon Boss Potato
+            const bossGeo = new THREE.BoxGeometry(4, 6, 4);
+            const bossMat = new THREE.MeshToonMaterial({ color: 0xbf965e }); // Potato brown
+            bossPotato = new THREE.Mesh(bossGeo, bossMat);
+            bossPotato.position.set(0, 3, -25); // Stand in distance
+            scene.add(bossPotato);
+
+            // Create stylized 3D details for the Boss (Eyes)
+            const eyeGeo = new THREE.SphereGeometry(0.5, 8, 8);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const pupilMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            
+            let leftEye = new THREE.Mesh(eyeGeo, eyeMat); leftEye.position.set(-1, 1.5, 2.1);
+            let rightEye = new THREE.Mesh(eyeGeo, eyeMat); rightEye.position.set(1, 1.5, 2.1);
+            let leftPupil = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), pupilMat); leftPupil.position.set(-1, 1.5, 2.5);
+            let rightPupil = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), pupilMat); rightPupil.position.set(1, 1.5, 2.5);
+            
+            bossPotato.add(leftEye, rightEye, leftPupil, rightPupil);
+
+            // Keyboard Hook Setup
+            window.addEventListener('keydown', (e) => handleKey(e.code, true));
+            window.addEventListener('keyup', (e) => handleKey(e.code, false));
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('click', shootWeapon);
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function handleKey(code, isDown) {
+            if (code === 'KeyW' || code === 'ArrowUp') moveForward = isDown;
+            if (code === 'KeyS' || code === 'ArrowDown') moveBackward = isDown;
+            if (code === 'KeyA' || code === 'ArrowLeft') moveLeft = isDown;
+            if (code === 'KeyD' || code === 'ArrowRight') moveRight = isDown;
+        }
+
+        function handleMouseMove(e) {
+            if (!isPlaying) return;
+            yaw -= e.movementX * mouseSensitivity;
+            pitch -= e.movementY * mouseSensitivity;
+            pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, pitch)); // Lock up/down lock boundaries
+
+            camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+        }
+
+        function startGame() {
+            document.getElementById('instructions').style.display = 'none';
+            // Request pointer lock mechanism so mouse functions cleanly inside screen boundaries
+            document.body.requestPointerLock = document.body.requestPointerLock || document.body.mozRequestPointerLock;
+            document.body.requestPointerLock();
+            isPlaying = true;
+        }
+
+        function shootWeapon() {
+            if (!isPlaying) return;
+            
+            // Animation flash effect for the 2D gun model
+            const gunImg = document.getElementById('fps-gun');
+            gunImg.style.transform = 'translateX(-50%) translateY(-20px) scale(1.1)';
+            setTimeout(() => gunImg.style.transform = 'translateX(-50%)', 80);
+
+            // Check accuracy alignment against Boss Position bounding box coordinates
+            let camDir = new THREE.Vector3();
+            camera.getWorldDirection(camDir);
+            
+            // Basic raycast math approach intersection boundary check
+            let distanceToBoss = -bossPotato.position.z;
+            let targetPosAtZ = camera.position.clone().add(camDir.multiplyScalar(distanceToBoss));
+
+            let lateralError = targetPosAtZ.distanceTo(bossPotato.position);
+            if (lateralError < 4) { // Hits inside potato mass box area
+                bossHp = Math.max(0, bossHp - 4);
+                document.getElementById('boss-hp-val').innerText = bossHp;
+                
+                // Visual Flash damage response animation
+                bossPotato.material.color.setHex(0xff0000);
+                setTimeout(() => bossPotato.material.color.setHex(0xbf965e), 100);
+
+                if (bossHp <= 0) {
+                    alert("💥 A KNOCKOUT! YOU SMASHED THE POTATO!");
+                    resetMatch();
+                }
+            }
+        }
+
+        function updateMovement(delta) {
+            if (!isPlaying) return;
+
+            // Reduce drag logic factor calculation
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize();
+
+            // Calculate movement vector local angle space transformation mapping
+            const camEuler = new THREE.Euler(0, yaw, 0, 'YXZ');
+            const moveVector = new THREE.Vector3(direction.x, 0, direction.z).applyEuler(camEuler);
